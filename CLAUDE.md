@@ -83,23 +83,43 @@ tests/
 Rodar: `cd C:\Users\roberto.vinicius && pytest tests/ -v`
 
 ## Status do Projeto (2026-05-27)
-- ✅ Tasks 1-12 do plano original implementadas (base completa, 16 testes passando)
-- 🔄 Em andamento: plano de áudio + visão + sheets
-  - Plano em: `docs/superpowers/plans/2026-05-26-audio-visao-sheets.md`
-  - Tasks: 8 no total
-  - Próxima: Task 1 (instalar openai-whisper)
+- ✅ Plano base completo (Tasks 1-12, 16 testes passando)
+- ✅ Plano áudio + visão + sheets completo (Tasks 1-8, 24 testes passando)
+- ✅ Repositório no GitHub: https://github.com/robertodta/agente-ia-pessoal (privado)
+- 🔜 Próximo passo: **deploy na VPS**
+
+## Checklist de Deploy (VPS)
+1. `git clone https://github.com/robertodta/agente-ia-pessoal.git`
+2. `pip install -r requirements.txt`
+3. `sudo apt install ffmpeg`
+4. Copiar `.env.example` → `.env` e preencher credenciais
+5. Habilitar **Google Sheets API** no Google Cloud Console (mesmo projeto)
+6. Gerar `token.json` com os 3 escopos (Calendar + Gmail + Sheets):
+   ```bash
+   python -c "from tools.sheets_tools import SheetsTools; SheetsTools('CLIENT_ID', 'CLIENT_SECRET', 'SHEETS_ID')"
+   ```
+7. Configurar systemd: `/etc/systemd/system/agente-ia.service` (ver README)
+8. `sudo systemctl enable agente-ia && sudo systemctl start agente-ia`
 
 ## Commits (branch master)
 ```
-cc32096  chore: estrutura base do projeto
-3f7f216  feat: adiciona ConversationStore com persistência em JSON
-3773de8  feat: adiciona NotionTools para leitura e criação de tarefas
-c93a808  feat: adiciona SearchTools com DuckDuckGo
-23ccc18  feat: adiciona CalendarTools para Google Calendar
-3701635  feat: adiciona GmailTools para envio de e-mails
-27761af  feat: adiciona Agent com loop de tool use e threading.Lock
-0e4f3ed  feat: adiciona scheduler, telegram_bot e main.py
+4c3f4fe  feat: integra AudioTools, VisionTools e SheetsTools no main.py
+1333dd1  feat: adiciona handlers de voz e foto no TelegramBot
+d52f8f9  feat: adiciona suporte a Sheets e visão no Agent
+7365105  feat: adiciona SheetsTools para Google Sheets
+24090b7  feat: adiciona VisionTools para preparar imagens para Claude
+3170bfd  feat: adiciona AudioTools com Whisper local
+70d5bdc  chore: adiciona openai-whisper às dependências
+92c3b48  docs: adiciona CLAUDE.md com contexto completo do projeto
 4a78f98  docs: adiciona README com instruções de setup e deploy
+0e4f3ed  feat: adiciona scheduler, telegram_bot e main.py
+27761af  feat: adiciona Agent com loop de tool use e threading.Lock
+3701635  feat: adiciona GmailTools para envio de e-mails
+23ccc18  feat: adiciona CalendarTools para Google Calendar
+c93a808  feat: adiciona SearchTools com DuckDuckGo
+3773de8  feat: adiciona NotionTools para leitura e criação de tarefas
+3f7f216  feat: adiciona ConversationStore com persistência em JSON
+cc32096  chore: estrutura base do projeto
 ```
 
 ## Docs
