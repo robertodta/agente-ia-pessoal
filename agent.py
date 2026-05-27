@@ -15,6 +15,7 @@ from tools.notion_tools import NotionTools
 from tools.search_tools import SearchTools
 from tools.calendar_tools import CalendarTools
 from tools.gmail_tools import GmailTools
+from tools.sheets_tools import SheetsTools
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,39 @@ FERRAMENTAS = [
             "required": ["destinatario", "assunto", "corpo"],
         },
     },
+    {
+        "name": "ler_planilha",
+        "description": "Lê valores de um intervalo de uma planilha do Google Sheets.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "intervalo": {
+                    "type": "string",
+                    "description": "Intervalo no formato A1 notation, ex: 'Sheet1!A1:D10'",
+                },
+            },
+            "required": ["intervalo"],
+        },
+    },
+    {
+        "name": "escrever_planilha",
+        "description": "Escreve valores em um intervalo de uma planilha do Google Sheets.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "intervalo": {
+                    "type": "string",
+                    "description": "Intervalo no formato A1 notation, ex: 'Sheet1!A2:B3'",
+                },
+                "valores": {
+                    "type": "array",
+                    "items": {"type": "array"},
+                    "description": "Lista de listas com os valores a escrever, ex: [['Nome', 'Status'], ['T1', 'A fazer']]",
+                },
+            },
+            "required": ["intervalo", "valores"],
+        },
+    },
 ]
 
 
@@ -116,6 +150,7 @@ class Agent:
         search: SearchTools,
         calendar: CalendarTools,
         gmail: GmailTools,
+        sheets: "SheetsTools | None" = None,
         max_mensagens: int = 40,
     ):
         self.client = anthropic.Anthropic(api_key=api_key)
@@ -124,6 +159,7 @@ class Agent:
         self.search = search
         self.calendar = calendar
         self.gmail = gmail
+        self.sheets = sheets
         self.max_mensagens = max_mensagens
         self._lock = threading.Lock()
 
@@ -148,6 +184,17 @@ class Agent:
                 )
             elif nome == "enviar_email":
                 return self.gmail.enviar_email(**argumentos)
+            elif nome == "ler_planilha":
+                if self.sheets is None:
+                    return {"erro": "Google Sheets não configurado. Adicione GOOGLE_SHEETS_SPREADSHEET_ID ao .env"}
+                return self.sheets.ler_planilha(intervalo=argumentos["intervalo"])
+            elif nome == "escrever_planilha":
+                if self.sheets is None:
+                    return {"erro": "Google Sheets não configurado. Adicione GOOGLE_SHEETS_SPREADSHEET_ID ao .env"}
+                return self.sheets.escrever_planilha(
+                    intervalo=argumentos["intervalo"],
+                    valores=argumentos["valores"],
+                )
             else:
                 return {"erro": f"Ferramenta desconhecida: {nome}"}
         except Exception as e:
@@ -245,6 +292,74 @@ class Agent:
 
                 else:
                     # stop_reason inesperado
+                    logger.warning("stop_reason inesperado: %s", resposta.stop_reason)
+                    return "Desculpe, não consegui processar sua solicitação."
+
+    def responder_com_imagem(self, texto_usuario: str, bloco_imagem: dict) -> str:
+        """
+        Processa uma mensagem com imagem anexada e retorna a resposta do agente.
+        O Claude analisa a imagem junto com o texto do usuário.
+        Thread-safe via lock interno.
+
+        Args:
+            texto_usuario: Texto da mensagem do usuário (pode ser "" se só mandou imagem)
+            bloco_imagem: Dict no formato Claude API image block (base64)
+
+        Returns:
+            Texto da resposta final do Claude
+        """
+        from datetime import date
+        system = SYSTEM_PROMPT.format(data_hoje=date.today().isoformat())
+
+        # Monta o conteúdo com imagem + texto
+        conteudo_usuario = [bloco_imagem]
+        texto = texto_usuario.strip() or "O que você vê nessa imagem? Descreva e extraia informações relevantes."
+        conteudo_usuario.append({"type": "text", "text": texto})
+
+        with self._lock:
+            # Salva no histórico como mensagem user com conteúdo misto
+            self.store.adicionar_mensagem("user", conteudo_usuario, self.max_mensagens)
+            mensagens = self.store.obter_mensagens()
+
+            # Loop de tool use (mesmo fluxo do responder())
+            while True:
+                resposta = self._chamar_claude_com_retry(mensagens, system)
+
+                if resposta.stop_reason == "end_turn":
+                    texto_resposta = next(
+                        (b.text for b in resposta.content if b.type == "text"), ""
+                    )
+                    self.store.adicionar_mensagem("assistant", texto_resposta, self.max_mensagens)
+                    return texto_resposta
+
+                elif resposta.stop_reason == "tool_use":
+                    conteudo_assistant = []
+                    for b in resposta.content:
+                        if b.type == "tool_use":
+                            conteudo_assistant.append({
+                                "type": "tool_use",
+                                "id": b.id,
+                                "name": b.name,
+                                "input": b.input,
+                            })
+                        elif b.type == "text":
+                            conteudo_assistant.append({"type": "text", "text": b.text})
+                    self.store.adicionar_mensagem("assistant", conteudo_assistant, self.max_mensagens)
+
+                    resultados_tools = []
+                    for bloco in resposta.content:
+                        if bloco.type == "tool_use":
+                            logger.info("Executando ferramenta: %s", bloco.name)
+                            resultado = self._executar_ferramenta(bloco.name, bloco.input)
+                            resultados_tools.append({
+                                "type": "tool_result",
+                                "tool_use_id": bloco.id,
+                                "content": json.dumps(resultado, ensure_ascii=False),
+                            })
+                    self.store.adicionar_mensagem("user", resultados_tools, self.max_mensagens)
+                    mensagens = self.store.obter_mensagens()
+
+                else:
                     logger.warning("stop_reason inesperado: %s", resposta.stop_reason)
                     return "Desculpe, não consegui processar sua solicitação."
 
