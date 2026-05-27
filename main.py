@@ -18,10 +18,13 @@ from agent import Agent
 from conversation_store import ConversationStore
 from scheduler import iniciar_scheduler
 from telegram_bot import TelegramBot
+from tools.audio_tools import AudioTools
 from tools.calendar_tools import CalendarTools
 from tools.gmail_tools import GmailTools
 from tools.notion_tools import NotionTools
 from tools.search_tools import SearchTools
+from tools.sheets_tools import SheetsTools
+from tools.vision_tools import VisionTools
 
 # Configuração de logging
 logging.basicConfig(
@@ -56,7 +59,7 @@ def main():
     logger.info("=== Iniciando Agente de IA ===")
     validar_variaveis_de_ambiente()
 
-    # Inicializar ferramentas
+    # Inicializar ferramentas principais
     logger.info("Inicializando ferramentas...")
     notion = NotionTools(
         token=os.getenv("NOTION_TOKEN"),
@@ -72,6 +75,22 @@ def main():
         client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
     )
 
+    # Ferramentas opcionais
+    audio_tools = AudioTools()
+    vision_tools = VisionTools()
+
+    sheets = None
+    sheets_id = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID")
+    if sheets_id:
+        logger.info("Google Sheets configurado: %s", sheets_id)
+        sheets = SheetsTools(
+            client_id=os.getenv("GOOGLE_CLIENT_ID"),
+            client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+            spreadsheet_id=sheets_id,
+        )
+    else:
+        logger.info("Google Sheets não configurado (GOOGLE_SHEETS_SPREADSHEET_ID não definido).")
+
     # Inicializar store e agent
     logger.info("Carregando histórico de conversa...")
     store = ConversationStore(caminho="data/conversation.json")
@@ -82,16 +101,19 @@ def main():
         search=search,
         calendar=calendar,
         gmail=gmail,
+        sheets=sheets,
         max_mensagens=int(os.getenv("MAX_HISTORY_MESSAGES", "40")),
     )
     logger.info("Agente inicializado com %d mensagens no histórico.", len(store.obter_mensagens()))
 
-    # Inicializar bot Telegram
+    # Inicializar bot Telegram com suporte a voz e foto
     chat_id = int(os.getenv("TELEGRAM_CHAT_ID"))
     bot = TelegramBot(
         token=os.getenv("TELEGRAM_TOKEN"),
         chat_id=chat_id,
         agent=agent,
+        audio_tools=audio_tools,
+        vision_tools=vision_tools,
     )
 
     # Inicializar scheduler
@@ -113,7 +135,7 @@ def main():
     thread_bot = threading.Thread(target=bot.iniciar, daemon=True, name="telegram-bot")
     thread_bot.start()
 
-    logger.info("✅ Agente rodando! Bot Telegram ativo, scheduler configurado.")
+    logger.info("✅ Agente rodando! Texto + voz + foto + sheets ativos.")
     logger.info("Pressione Ctrl+C para encerrar.")
 
     # Mantém o processo principal vivo
